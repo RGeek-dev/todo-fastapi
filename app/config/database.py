@@ -24,3 +24,18 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 # It maintains a registry of all models — SQLAlchemy uses this
 # to know which tables exist when you call create_all().
 Base = declarative_base()
+
+
+# app/config/database.py (add this below)
+
+def get_db():
+    """
+    FastAPI dependency — yields a DB session for one request, then closes it.
+    The 'yield' makes this a generator. FastAPI handles calling next() before
+    the route and cleanup after — like Express middleware calling next().
+    """
+    db = SessionLocal()
+    try:
+        yield db       # Hand the session to the route handler
+    finally:
+        db.close()     # Always runs — even if an exception was raised
