@@ -1,0 +1,70 @@
+# docker-compose.yml
+
+version: "3.9"
+
+services:
+
+  # ─── PostgreSQL ───────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine          # Official Postgres image, Alpine = smaller
+    container_name: todo_postgres
+    restart: unless-stopped            # Auto-restart on crash, but not if you manually stop it
+    env_file:
+      - .env                           # Postgres reads POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB
+    volumes:
+      - postgres_data:/var/lib/postgresql/data   # Persist DB data across restarts
+    ports:
+      - "5433:5432"                    # Host 5433 → container 5432
+                                       # Using 5433 avoids collision with your local Postgres on 5432
+    networks:
+      - todo_network
+    healthcheck:                       # Compose waits for this before starting dependent services
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # ─── FastAPI App ──────────────────────────────────────────────
+  api:
+    build: .                           # Build from the Dockerfile in the current directory
+    container_name: todo_api
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "8000:8000"                    # Host 8000 → container 8000
+    volumes:
+      - .:/app                         # Mount your local code into the container
+                                       # Changes on disk reflect immediately (hot reload works)
+    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload   # Override CMD for dev
+    depends_on:
+      postgres:
+        condition: service_healthy     # Wait until Postgres passes its healthcheck
+    networks:
+      - todo_network
+
+  # ─── pgAdmin ──────────────────────────────────────────────────
+  pgadmin:
+    image: dpage/pgadmin4
+    container_name: todo_pgadmin
+    restart: unless-stopped
+    env_file:
+      - .env                           # Reads PGADMIN_EMAIL, PGADMIN_PASSWORD
+    ports:
+      - "5050:80"                      # pgAdmin UI at http://localhost:5050
+    depends_on:
+      - postgres
+    networks:
+      - todo_network
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin  # Persist pgAdmin server registrations
+
+# ─── Named Volumes ────────────────────────────────────────────────
+volumes:
+  postgres_data:     # Managed by Docker — survives container removal
+  pgadmin_data:
+
+# ─── Network ──────────────────────────────────────────────────────
+networks:
+  todo_network:
+    driver: bridge   # Default — a private LAN between all services in this file
