@@ -26,7 +26,7 @@ services:
 
   # ─── FastAPI App ──────────────────────────────────────────────
   api:
-    build: .                           # Build from the Dockerfile in the current directory
+    build: shivendrageek/todo-fastapi:latest                           # Build from the Dockerfile in the current directory
     container_name: todo_api
     restart: unless-stopped
     env_file:
