@@ -4,67 +4,74 @@ version: "3.9"
 
 services:
 
-  # ─── PostgreSQL ───────────────────────────────────────────────
   postgres:
-    image: postgres:16-alpine          # Official Postgres image, Alpine = smaller
+    image: postgres:16-alpine
     container_name: todo_postgres
-    restart: unless-stopped            # Auto-restart on crash, but not if you manually stop it
+    restart: unless-stopped
     env_file:
-      - .env                           # Postgres reads POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB
+      - .env
     volumes:
-      - postgres_data:/var/lib/postgresql/data   # Persist DB data across restarts
-    ports:
-      - "5433:5432"                    # Host 5433 → container 5432
-                                       # Using 5433 avoids collision with your local Postgres on 5432
+      - postgres_data:/var/lib/postgresql/data
     networks:
       - todo_network
-    healthcheck:                       # Compose waits for this before starting dependent services
+    healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 5s
       timeout: 5s
       retries: 5
+    # No ports exposed to host — only Nginx talks to Postgres via Docker network.
+    # This is a security improvement over the previous setup.
 
-  # ─── FastAPI App ──────────────────────────────────────────────
   api:
-    build: shivendrageek/todo-fastapi:latest                           # Build from the Dockerfile in the current directory
-    container_name: todo_api
+    build: .
     restart: unless-stopped
     env_file:
       - .env
-    ports:
-      - "8000:8000"                    # Host 8000 → container 8000
     volumes:
-      - .:/app                         # Mount your local code into the container
-                                       # Changes on disk reflect immediately (hot reload works)
-    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload   # Override CMD for dev
+      - .:/app
+    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
     depends_on:
       postgres:
-        condition: service_healthy     # Wait until Postgres passes its healthcheck
+        condition: service_healthy
+    networks:
+      - todo_network
+    # No ports exposed to host — Nginx is the only entry point.
+    # Direct access to :8000 from outside Docker is now blocked.
+
+  nginx:
+    image: nginx:alpine
+    container_name: todo_nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"       # HTTP (redirects to HTTPS)
+      - "443:443"     # HTTPS
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro    # ro = read-only mount
+      - ./nginx/certs:/etc/nginx/certs:ro
+    depends_on:
+      - api
     networks:
       - todo_network
 
-  # ─── pgAdmin ──────────────────────────────────────────────────
   pgadmin:
     image: dpage/pgadmin4
     container_name: todo_pgadmin
     restart: unless-stopped
     env_file:
-      - .env                           # Reads PGADMIN_EMAIL, PGADMIN_PASSWORD
+      - .env
     ports:
-      - "5050:80"                      # pgAdmin UI at http://localhost:5050
+      - "5050:80"
     depends_on:
       - postgres
     networks:
       - todo_network
     volumes:
-      - pgadmin_data:/var/lib/pgadmin  # Persist pgAdmin server registrations
+      - pgadmin_data:/var/lib/pgadmin
 
-# ─── Named Volumes ────────────────────────────────────────────────
 volumes:
-  postgres_data:     # Managed by Docker — survives container removal
+  postgres_data:
   pgadmin_data:
 
-# ─── Network ──────────────────────────────────────────────────────
 networks:
   todo_network:
-    driver: bridge   # Default — a private LAN between all services in this file
+    driver: bridge
